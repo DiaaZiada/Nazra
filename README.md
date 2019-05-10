@@ -8,3 +8,7 @@ Deep Learning for Hand Pose Estimation
 
 # Deployment
 **To be Continued**
+
+<p align="center">
+  <img src="https://github.com/MohamedAliRashad/Nazra/blob/master/class_diagram.png" width="600">
+ </p>
