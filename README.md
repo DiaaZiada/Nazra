@@ -14,6 +14,7 @@ This project was inspired from the great company [Leap Motion](https://www.leapm
 - [Hand Pose Estimation: A Survey](https://arxiv.org/abs/1903.01013v1)
 - [V2V-PoseNet: Voxel-to-Voxel Prediction Network for Accurate 3D Hand Pose Estimation](https://arxiv.org/abs/1711.07399v3)
 - [Real-time Hand Tracking under Occlusion from an Egocentric RGB-D Sensor](https://arxiv.org/abs/1704.02201v2)
+- [Real-time Hand Gesture Detection and Classification Using Convolutional Neural Networks](https://arxiv.org/abs/1901.10323v2)
 
 ## Deployment
 **To be Continued**
