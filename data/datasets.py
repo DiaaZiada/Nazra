@@ -37,7 +37,7 @@ def joint_rearranger(joint_pos, joint_current_order, joint_target):
 
 
 class GANHandDataset(Dataset):
-    def __init__(self, csv_path="./dataset_noObj.csv", transform="None"):
+    def __init__(self, object=False):
         """
         Args:
             csv_file (string): Path to the csv file with annotations.
@@ -48,13 +48,19 @@ class GANHandDataset(Dataset):
         self.data = []
         self.target = []
 
+        if (not os.path.isfile("dataset_noObj.csv")):
+            os.system("python3 GANerated.py")
+
+        if (object):
+            csv_path = "dataset_withObj.csv"
+        else:
+            csv_path = "dataset_noObj.csv"
+
         with open(csv_path, "r") as f:
             reader = csv.reader(f)
             for row in reader:
                 self.data.append(row[0])
                 self.target.append(row[1])
-
-        self.transform = transform
 
     def __len__(self):
         return len(self.data)
