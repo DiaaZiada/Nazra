@@ -1,12 +1,15 @@
 import os
 import csv
+import argparse
+
 
 def list2str(l):
     x = ""
     for c in l:
         x += c + " "
-    
+
     return x[:-1]
+
 
 def txt2dict(txt_path):
     output = {}
@@ -15,37 +18,53 @@ def txt2dict(txt_path):
         for row in reader:
             ir = row[0].split(" ")
             ro = list2str(ir[1:])
-            output[ir[0]] =  ro
-    
+            output[ir[0]] = ro
+
     return output
 
-def subject_csv_creator(subject_path):
-        
-    actions_paths = [os.path.join(subject_path, x) for x in os.listdir(subject_path)]
 
-    intermediate_paths = []
+def subjects_csv_creator(subjects_path):
 
-    for action_path in actions_paths:
-        for path in os.listdir(action_path):
-            intermediate_paths.append(os.path.join(action_path, path))
+    csv_name = "Subject.csv"
 
-    csv_name = subject_path.split("/")[-1] + ".csv"
+    for subject_path in subjects_path:
 
-    with open(csv_name, 'w') as f:
-        writer = csv.writer(f)
-        for path in intermediate_paths:
-            Num_images = len(os.listdir(os.path.join(path, "color")))
-            for i in range(Num_images):
-                rgb_path = os.path.join(path, "color/color_{:0>4d}.jpeg".format(i))
-                depth_path = os.path.join(path, "depth/depth_{:0>4d}.png".format(i))
-                joint_data = txt2dict(os.path.join(path, "skeleton.txt"))['{:0>4d}'.format(i)]
-                writer.writerow([rgb_path, depth_path, joint_data])
+        actions_paths = [
+            os.path.join(subject_path, x) for x in os.listdir(subject_path)
+        ]
+
+        intermediate_paths = []
+
+        for action_path in actions_paths:
+            for path in os.listdir(action_path):
+                intermediate_paths.append(os.path.join(action_path, path))
+
+        with open(csv_name, 'a') as f:
+            writer = csv.writer(f)
+            for path in intermediate_paths:
+                Num_images = len(os.listdir(os.path.join(path, "color")))
+                for i in range(Num_images):
+                    rgb_path = os.path.join(
+                        path, "color/color_{:0>4d}.jpeg".format(i))
+                    depth_path = os.path.join(
+                        path, "depth/depth_{:0>4d}.png".format(i))
+                    joint_data = txt2dict(os.path.join(
+                        path, "skeleton.txt"))['{:0>4d}'.format(i)]
+                    writer.writerow([rgb_path, depth_path, joint_data])
+
 
 def main():
 
-    subject6_path = "/media/rashad/01D3F6FB8718F3E0/FPAB/Subject_6"
+    parser = argparse.ArgumentParser(description="FPAB parser")
+    parser.add_argument("subjects", help="Subjects path", type=str)
+    args = parser.parse_args()
 
-    subject_csv_creator(subject6_path)
+    subject_paths = [
+        os.path.join(args.subjects, "Subject_" + str(x)) for x in range(1, 7)
+    ]
+
+    subjects_csv_creator(subject_paths)
+
 
 if __name__ == "__main__":
     main()
