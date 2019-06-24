@@ -77,8 +77,6 @@ class GANHandDataset(Dataset):
         return sample
 
 
-
-
 class FPABDataset(Dataset):
     def __init__(self, csv_path="./Subject.csv", transform="None"):
         """
@@ -118,6 +116,7 @@ class FPABDataset(Dataset):
         }
 
         return sample
+
 
 # class EgoHandDataset(Dataset):
 #     def __init__(self, dataset_dir="./EgoHands_dataset/", transform="None"):
