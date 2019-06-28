@@ -1,0 +1,223 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun 29 00:20:39 2019
+
+@author: Diaa Elsayed
+"""
+
+
+from torch import nn
+from halnet_blocks import *
+from util import cudafy
+
+def _print_layer_output_shape(layer_name, output_shape):
+    print("Layer " + layer_name + " output shape: " + str(output_shape))
+
+def HALNetResConvSequence(stride, filters1, filters2,
+                          padding1=1, padding2=0, padding3=0,
+                          first_in_channels=0):
+    if first_in_channels == 0:
+        first_in_channels = filters1
+    return nn.Sequential(
+        # added padding = 1 to make shapes fit when joining
+        # with left module
+        NetBlockConvBatchRelu(kernel_size=1, stride=stride, out_channels=filters1,
+                              in_channels=first_in_channels, padding=padding1),
+        NetBlockConvBatchRelu(kernel_size=3, stride=1, out_channels=filters1,
+                              in_channels=filters1, padding=padding2),
+        NetBlockConvBatchRelu(kernel_size=1, stride=1, out_channels=filters2,
+                              in_channels=filters1, padding=padding3)
+    )
+
+class HALNetResBlockIDSkip(nn.Module):
+    def __init__(self, filters1, filters2,
+                 padding_right1=1, padding_right2=0, padding_right3=0):
+        super(HALNetResBlockIDSkip, self).__init__()
+        self.right_res = HALNetResConvSequence(stride=1,
+                                               filters1=filters1,
+                                               filters2=filters2,
+                                               padding1=padding_right1,
+                                               padding2=padding_right2,
+                                               padding3=padding_right3,
+                                               first_in_channels=
+                                               filters2)
+        self.relu = nn.ReLU()
+
+    def forward(self, input):
+        left_res = input
+        right_res = self.right_res(input)
+        # element-wise sum
+        out = left_res + right_res
+        out = self.relu(out)
+        return out
+
+class HALNetResBlockConv(nn.Module):
+    def __init__(self, stride, filters1, filters2, first_in_channels=0,
+                 padding_left=0, padding_right1=0, padding_right2=0,
+                 padding_right3=0):
+        super(HALNetResBlockConv, self).__init__()
+        if first_in_channels == 0:
+            first_in_channels = filters1
+        self.left_res = NetBlockConvBatchRelu(kernel_size=1, stride=stride,
+                                              out_channels=filters2,
+                                              padding=padding_left,
+                                              in_channels=first_in_channels)
+        self.right_res = HALNetResConvSequence(stride=stride,
+                                               filters1=filters1,
+                                               filters2=filters2,
+                                               padding1=padding_right1,
+                                               padding2=padding_right2,
+
+                                               padding3=padding_right3,
+                                               first_in_channels=
+                                               first_in_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, input):
+        left_res = self.left_res(input)
+        right_res = self.right_res(input)
+        # element-wise sum
+        out = left_res + right_res
+        out = self.relu(out)
+        return out
+
+def make_bilinear_weights(size, num_channels):
+    ''' Make a 2D bilinear kernel suitable for upsampling
+    Stack the bilinear kernel for application to tensor '''
+    factor = (size + 1) // 2
+    if size % 2 == 1:
+        center = factor - 1
+    else:
+        center = factor - 0.5
+    og = np.ogrid[:size, :size]
+    filt = (1 - abs(og[0] - center) / factor) * \
+           (1 - abs(og[1] - center) / factor)
+    filt = torch.from_numpy(filt)
+    w = torch.zeros(num_channels, 1, size, size)
+    for i in range(num_channels):
+        w[i, 0] = filt
+    return w
+
+def parse_model_param(params_dict, key, default_value):
+    try:
+        ret = params_dict[key]
+    except:
+        if default_value == "Mandatory":
+            # raise error again by trying to access value
+            ret = params_dict[key]
+        ret = default_value
+    return ret
+
+class HALNet(nn.Module):
+
+    cross_entropy = False
+    joint_ixs = None
+    use_cuda = None
+    WEIGHT_LOSS_INTERMED1 = 0.5
+    WEIGHT_LOSS_INTERMED2 = 0.5
+    WEIGHT_LOSS_INTERMED3 = 0.5
+    WEIGHT_LOSS_MAIN = 1
+
+    def __init__(self):
+        super(HALNet, self).__init__()
+        # initialize variables
+#         self.joint_ixs = parse_model_param(params_dict, 'joint_ixs', default_value="Mandatory")
+        self.use_cuda = True #parse_model_param(params_dict, 'use_cuda', default_value=False)
+        self.num_joints = 21#len(self.joint_ixs)
+        self.cross_entropy =  nn.CrossEntropyLoss()# parse_model_param(params_dict, 'cross_entropy', default_value=False)
+        # build network
+        self.conv1 = cudafy(NetBlockConvBatchRelu(kernel_size=7, stride=1, out_channels=64,
+                                                  in_channels=4, padding=3), self.use_cuda)
+        self.mp1 = cudafy(nn.MaxPool2d(kernel_size=3, stride=2, padding=1), self.use_cuda)
+        self.res2a = cudafy(HALNetResBlockConv(stride=1, filters1=64, filters2=256,
+                                        padding_right1=1), self.use_cuda)
+        self.res2b = cudafy(HALNetResBlockIDSkip(filters1=64, filters2=256), self.use_cuda)
+        self.res2c = cudafy(HALNetResBlockIDSkip(filters1=64, filters2=256), self.use_cuda)
+        self.res3a = cudafy(HALNetResBlockConv(stride=2, filters1=128, filters2=512,
+                                               padding_right3=1, first_in_channels=256), self.use_cuda)
+        self.interm_loss1 = cudafy(NetBlockConvBatchRelu(kernel_size=3, stride=1, out_channels=self.num_joints,
+                                                         in_channels=512, padding=1), self.use_cuda)
+        self.interm_loss1_deconv = cudafy(nn.Upsample(scale_factor=4, mode='bilinear', align_corners=True), self.use_cuda)
+        self.interm_loss1_softmax = cudafy(NetBlockSoftmaxLogProbability2D(), self.use_cuda)
+        self.res3b = cudafy(HALNetResBlockIDSkip(filters1=128, filters2=512), self.use_cuda)
+        self.res3c = cudafy(HALNetResBlockIDSkip(filters1=128, filters2=512), self.use_cuda)
+        self.res4a = cudafy(HALNetResBlockConv(stride=2, filters1=256, filters2=1024,
+                                        padding_right3=1,
+                                        first_in_channels=512), self.use_cuda)
+        self.interm_loss2 = cudafy(NetBlockConvBatchRelu(kernel_size=3, stride=1,
+                                                         out_channels=self.num_joints, in_channels=1024,
+                                                         padding=1), self.use_cuda)
+        self.interm_loss2_deconv = cudafy(nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True), self.use_cuda)
+        self.interm_loss2_softmax = cudafy(NetBlockSoftmaxLogProbability2D(), self.use_cuda)
+        self.res4b = cudafy(HALNetResBlockIDSkip(filters1=256, filters2=1024), self.use_cuda)
+        self.res4c = cudafy(HALNetResBlockIDSkip(filters1=256, filters2=1024), self.use_cuda)
+        self.res4d = cudafy(HALNetResBlockIDSkip(filters1=256, filters2=1024), self.use_cuda)
+        self.conv4e = cudafy(NetBlockConvBatchRelu(kernel_size=3, stride=1, out_channels=512,
+                                                   in_channels=1024, padding=1), self.use_cuda)
+        self.interm_loss3 = cudafy(NetBlockConvBatchRelu(kernel_size=3, stride=1,
+                                                         out_channels=self.num_joints, in_channels=512,
+                                                         padding=1), self.use_cuda)
+        self.interm_loss3_deconv = cudafy(nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True), self.use_cuda)
+        self.interm_loss3_softmax = cudafy(NetBlockSoftmaxLogProbability2D(), self.use_cuda)
+        self.conv4f = cudafy(NetBlockConvBatchRelu(kernel_size=3, stride=1, out_channels=256,
+                                                   in_channels=512, padding=1), self.use_cuda)
+        self.main_loss_conv = cudafy(NetBlockConvBatchRelu(kernel_size=3, stride=1,
+                                                           out_channels=self.num_joints, in_channels=256,
+                                                           padding=1), self.use_cuda)
+        self.main_loss_deconv = cudafy(nn.Upsample(scale_factor=8, mode='bilinear', align_corners=True), self.use_cuda)
+        if self.cross_entropy:
+            self.softmax_final = cudafy(NetBlockSoftmaxLogProbability2D(), self.use_cuda)
+
+    def forward_common_net(self, x):
+        out = self.conv1(x)
+        out = self.mp1(out)
+        out = self.res2a(out)
+        out = self.res2b(out)
+        out = self.res2c(out)
+        res3aout = self.res3a(out)
+        out = self.res3b(res3aout)
+        out = self.res3c(out)
+        res4aout = self.res4a(out)
+        out = self.res4b(res4aout)
+        out = self.res4c(out)
+        out = self.res4d(out)
+        conv4eout = self.conv4e(out)
+        conv4fout = self.conv4f(conv4eout)
+        return res3aout, res4aout, conv4eout, conv4fout
+
+    def forward_subnet(self, x):
+        res3aout, res4aout, conv4eout, conv4fout = self.forward_common_net(x)
+        # intermediate losses
+        # intermed 1
+        out_intermed1 = self.interm_loss1(res3aout)
+        out_intermed1 = self.interm_loss1_deconv(out_intermed1)
+        if self.cross_entropy:
+            out_intermed1 = self.interm_loss1_softmax(out_intermed1)
+        # intermed 2
+        out_intermed2 = self.interm_loss2(res4aout)
+        out_intermed2 = self.interm_loss2_deconv(out_intermed2)
+        if self.cross_entropy:
+            out_intermed2 = self.interm_loss2_softmax(out_intermed2)
+        # intermed 3
+        out_intermed3 = self.interm_loss3(conv4eout)
+        out_intermed3 = self.interm_loss3_deconv(out_intermed3)
+        if self.cross_entropy:
+            out_intermed3 = self.interm_loss3_softmax(out_intermed3)
+        return out_intermed1, out_intermed2, out_intermed3, conv4fout,\
+               res3aout, res4aout, conv4eout
+
+    def forward_main_loss(self, conv4fout):
+        out = self.main_loss_conv(conv4fout)
+        out = self.main_loss_deconv(out)
+        out_main = out
+        # main loss
+        if self.cross_entropy:
+            out_main = self.softmax_final(out)
+        return out_main
+
+    def forward(self, x):
+        # get subhalnet outputs (common to JORNet)
+        out_intermed1, out_intermed2, out_intermed3, conv4fout, _, _, _ = self.forward_subnet(x)
+        # out to main loss of halnet
+        out_main = self.forward_main_loss(conv4fout)
+        return out_intermed1, out_intermed2, out_intermed3, out_main
