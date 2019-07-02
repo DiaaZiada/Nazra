@@ -157,5 +157,5 @@ class FPABDataset(Dataset):
 #         return tensor
 
 # Testing
-# dataset = FPABDataset()
-# loader = DataLoader(dataset)
+dataset = GANHandDataset()
+print(dataset.__getitem__(0))
