@@ -48,12 +48,15 @@ class GANHandDataset(Dataset):
         self.data = []
         self.target = []
 
-        if (not os.path.isfile("dataset_noObj.csv")):
-            os.system("python3 GANerated.py")
-
         if (object):
+            if (not os.path.isfile("dataset_withObj.csv")):
+                from GANerated import Download_withObj
+                Download_withObj()
             csv_path = "dataset_withObj.csv"
         else:
+            if (not os.path.isfile("dataset_noObj.csv")):
+                from GANerated import Download_noObj
+                Download_noObj()
             csv_path = "dataset_noObj.csv"
 
         with open(csv_path, "r") as f:
